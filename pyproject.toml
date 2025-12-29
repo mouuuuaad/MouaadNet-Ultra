@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mouaadnet-ultra"
+version = "1.0.0"
+description = "High-Efficiency Human Detection and Gender Classification Neural Network"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "MOUAAD IDOUFKIR", email = "mouaad.idoufkir@example.com"}
+]
+maintainers = [
+    {name = "MOUAAD IDOUFKIR", email = "mouaad.idoufkir@example.com"}
+]
+keywords = [
+    "deep-learning",
+    "computer-vision",
+    "object-detection",
+    "gender-classification",
+    "pytorch",
+    "neural-network",
+    "edge-ai",
+    "real-time",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.21.0",
+    "Pillow>=9.0.0",
+    "tqdm>=4.60.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+export = [
+    "onnx>=1.14.0",
+    "onnxruntime>=1.15.0",
+    "onnxsim>=0.4.0",
+]
+all = [
+    "mouaadnet-ultra[dev,export]",
+]
+
+[project.urls]
+Homepage = "https://github.com/mouaadidoufkir/mouaadnet-ultra"
+Documentation = "https://github.com/mouaadidoufkir/mouaadnet-ultra#readme"
+Repository = "https://github.com/mouaadidoufkir/mouaadnet-ultra.git"
+Issues = "https://github.com/mouaadidoufkir/mouaadnet-ultra/issues"
+Changelog = "https://github.com/mouaadidoufkir/mouaadnet-ultra/blob/main/CHANGELOG.md"
+
+[project.scripts]
+mouaadnet-train = "scripts.train:main"
+mouaadnet-export = "scripts.export:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mouaadnet_ultra*"]
+exclude = ["tests*", "docs*", "examples*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["mouaadnet_ultra"]
+skip_gitignore = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["mouaadnet_ultra"]
+omit = ["tests/*", "examples/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

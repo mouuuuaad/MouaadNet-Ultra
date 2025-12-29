@@ -1,0 +1,87 @@
+# Default configuration for MOUAADNET-ULTRA training
+
+# Model
+model:
+  variant: "ultra"           # ultra, lite, or pro
+  width_mult: 1.0
+  neck_channels: 64
+  num_classes: 1             # 1 for person detection
+
+# Data
+data:
+  train_path: "data/train"
+  val_path: "data/val"
+  img_size: 416
+  batch_size: 32
+  num_workers: 8
+  pin_memory: true
+
+# Augmentation
+augmentation:
+  hsv_h: 0.015               # Hue augmentation
+  hsv_s: 0.7                 # Saturation augmentation
+  hsv_v: 0.4                 # Value augmentation
+  degrees: 10                # Rotation degrees
+  translate: 0.1             # Translation
+  scale: 0.5                 # Scale
+  shear: 2.0                 # Shear
+  flipud: 0.0                # Vertical flip probability
+  fliplr: 0.5                # Horizontal flip probability
+  mosaic: 0.5                # Mosaic probability
+  mixup: 0.1                 # MixUp probability
+
+# Training
+training:
+  epochs: 100
+  optimizer: "adamw"
+  learning_rate: 0.0001
+  max_lr: 0.001              # For one-cycle
+  weight_decay: 0.0001
+  momentum: 0.9
+  warmup_epochs: 3
+  gradient_clip: 1.0
+  accumulation_steps: 1
+  use_amp: true              # Mixed precision
+
+# Loss weights
+loss:
+  det_weight: 1.0
+  gender_weight: 1.0
+  heatmap_weight: 1.0
+  size_weight: 0.1
+  offset_weight: 1.0
+  gender_pos_weight: 5.0     # For class imbalance
+
+# Scheduler
+scheduler:
+  type: "one_cycle"          # one_cycle, cosine, step
+  pct_start: 0.3
+  div_factor: 25
+  final_div_factor: 10000
+
+# Checkpointing
+checkpoint:
+  save_dir: "checkpoints"
+  save_interval: 5           # Save every N epochs
+  keep_last: 5               # Keep last N checkpoints
+
+# Logging
+logging:
+  log_interval: 50           # Log every N batches
+  val_interval: 1            # Validate every N epochs
+  tensorboard: true
+  wandb: false
+  project_name: "mouaadnet-ultra"
+
+# Export
+export:
+  onnx: true
+  input_size: [416, 416]
+  dynamic_axes: true
+  simplify: true
+  quantize: "int8"           # none, int8, fp16
+
+# Hardware
+hardware:
+  device: "cuda"             # cuda or cpu
+  cudnn_benchmark: true

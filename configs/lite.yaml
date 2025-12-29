@@ -1,0 +1,26 @@
+# Lite model configuration - optimized for mobile/edge
+
+# Inherit from default
+_base_: ["default.yaml"]
+
+# Model overrides
+model:
+  variant: "lite"
+  width_mult: 0.5
+  neck_channels: 48
+
+# Smaller batch for edge devices
+data:
+  batch_size: 16
+  img_size: 320
+
+# Faster training
+training:
+  epochs: 80
+  learning_rate: 0.0002
+  max_lr: 0.002
+
+# Quantization focused
+export:
+  input_size: [320, 320]
+  quantize: "int8"

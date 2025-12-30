@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 class Config:
     """Training configuration - SOTA Nano Settings."""
-    # Data
-    img_size: int = 320  # Fixed size for ONNX optimization
+    # Data - Fixed size for maximum ONNX compatibility
+    img_size: int = 256  # Fixed 256x256 for ONNX robustness
     batch_size: int = 32
     num_workers: int = 4
     
@@ -459,9 +459,10 @@ class Trainer:
         logger.info(f"Loaded checkpoint from epoch {self.epoch}")
     
     def train_epoch(self) -> float:
-        """Train one epoch with 1CycleLR."""
+        """Train one epoch with 1CycleLR and AMP."""
         self.model.train()
         total_loss = 0
+        num_batches = 0
         
         from tqdm import tqdm
         pbar = tqdm(self.train_loader, desc=f'Epoch {self.epoch+1}')
@@ -490,22 +491,25 @@ class Trainer:
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                 
-                # 1. Optimizer step (update weights)
+                # Track optimizer step count to detect if scaler skipped
+                old_scale = self.scaler.get_scale()
                 self.scaler.step(self.optimizer)
+                new_scale = self.scaler.get_scale()
                 self.scaler.update()
                 
-                # 2. Scheduler step (update LR) - MUST be after optimizer.step()
-                self.scheduler.step()
+                # Only step scheduler if optimizer actually stepped (not skipped due to inf/nan)
+                if old_scale <= new_scale:
+                    self.scheduler.step()
                 
                 total_loss += loss.item()
+                num_batches += 1
                 
-                # Get LR after scheduler step to avoid warning
                 lr = self.scheduler.get_last_lr()[0]
                 pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr:.2e}")
             else:
-                pbar.set_postfix(loss="NaN")
+                pbar.set_postfix(loss="NaN/Inf skipped")
         
-        return total_loss / len(self.train_loader)
+        return total_loss / max(num_batches, 1)
     
     @torch.no_grad()
     def validate(self) -> float:
@@ -562,7 +566,7 @@ class Trainer:
 # =============================================================================
 # EXPORT
 # =============================================================================
-def export_onnx(model: nn.Module, save_path: str, img_size: int = 320) -> None:
+def export_onnx(model: nn.Module, save_path: str, img_size: int = 256) -> None:
     """Export model to ONNX."""
     model.eval()
     model.cpu()

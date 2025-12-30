@@ -474,29 +474,36 @@ class Trainer:
             
             self.optimizer.zero_grad(set_to_none=True)
             
+            # Mixed Precision (FP16) for memory efficiency and speed
             with torch.amp.autocast('cuda'):
                 outputs = self.model(imgs)
                 pred_hm = outputs['heatmaps'][0]
                 pred_wh = outputs['sizes'][0]
                 
+                # Focal Loss for sparse person-pixels
                 losses = self.criterion(pred_hm, pred_wh, gt_hm, gt_wh, mask)
                 loss = losses['total']
             
             if torch.isfinite(loss):
+                # Backward with scaled gradients
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
+                
+                # 1. Optimizer step (update weights)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 
-                # 1CycleLR: step after each batch
+                # 2. Scheduler step (update LR) - MUST be after optimizer.step()
                 self.scheduler.step()
                 
                 total_loss += loss.item()
-            
-            # Show LR in progress bar
-            lr = self.scheduler.get_last_lr()[0]
-            pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr:.2e}")
+                
+                # Get LR after scheduler step to avoid warning
+                lr = self.scheduler.get_last_lr()[0]
+                pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr:.2e}")
+            else:
+                pbar.set_postfix(loss="NaN")
         
         return total_loss / len(self.train_loader)
     

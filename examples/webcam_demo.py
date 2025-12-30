@@ -111,32 +111,44 @@ def decode_heatmap(heatmap, threshold=0.3, top_k=20):
     return detections
 
 
-def draw_detections(frame, detections, sizes, scale_info, stride=4):
+def draw_detections(frame, detections, sizes, scale_info, stride=4, img_size=416):
     """
     Draw detection boxes on frame.
     
     Args:
         frame: Original BGR frame
         detections: List of (x, y, conf) from heatmap
-        sizes: Size predictions tensor
+        sizes: Size predictions tensor (normalized w, h)
         scale_info: (scale, top, left, orig_h, orig_w)
         stride: Heatmap stride
+        img_size: Model input size
     """
     scale, top, left, orig_h, orig_w = scale_info
     
     for x, y, conf in detections:
-        # Get size at this location
-        if sizes is not None:
-            w_box = abs(sizes[0, 0, int(y), int(x)].item()) * stride * 4
-            h_box = abs(sizes[0, 1, int(y), int(x)].item()) * stride * 4
+        # Get size at this location (sizes are normalized 0-1)
+        if sizes is not None and y < sizes.shape[2] and x < sizes.shape[3]:
+            # Denormalize: multiply by img_size to get pixel size
+            w_box = abs(sizes[0, 0, int(y), int(x)].item()) * img_size
+            h_box = abs(sizes[0, 1, int(y), int(x)].item()) * img_size
+            
+            # Minimum size
+            w_box = max(w_box, 50)
+            h_box = max(h_box, 100)
         else:
+            # Default person size
             w_box = 80
-            h_box = 160
+            h_box = 180
         
-        # Convert to original image coordinates
-        cx = (x * stride - left) / scale
-        cy = (y * stride - top) / scale
+        # Convert heatmap coords to input image coords
+        cx_input = x * stride
+        cy_input = y * stride
         
+        # Convert to original image coordinates (undo padding and scaling)
+        cx = (cx_input - left) / scale
+        cy = (cy_input - top) / scale
+        
+        # Get box corners
         x1 = int(cx - w_box / 2 / scale)
         y1 = int(cy - h_box / 2 / scale)
         x2 = int(cx + w_box / 2 / scale)
@@ -148,16 +160,31 @@ def draw_detections(frame, detections, sizes, scale_info, stride=4):
         x2 = min(orig_w, x2)
         y2 = min(orig_h, y2)
         
-        # Draw box
-        color = (0, 255, 0)  # Green
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        # Skip if box is too small or invalid
+        if x2 - x1 < 20 or y2 - y1 < 20:
+            continue
         
-        # Draw label
-        label = f"Person {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
-        cv2.putText(frame, label, (x1, y1 - 2), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+        # Draw thick green box
+        color = (0, 255, 0)  # Green
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
+        
+        # Draw corner accents for better visibility
+        corner_len = 15
+        cv2.line(frame, (x1, y1), (x1 + corner_len, y1), color, 4)
+        cv2.line(frame, (x1, y1), (x1, y1 + corner_len), color, 4)
+        cv2.line(frame, (x2, y1), (x2 - corner_len, y1), color, 4)
+        cv2.line(frame, (x2, y1), (x2, y1 + corner_len), color, 4)
+        cv2.line(frame, (x1, y2), (x1 + corner_len, y2), color, 4)
+        cv2.line(frame, (x1, y2), (x1, y2 - corner_len), color, 4)
+        cv2.line(frame, (x2, y2), (x2 - corner_len, y2), color, 4)
+        cv2.line(frame, (x2, y2), (x2, y2 - corner_len), color, 4)
+        
+        # Draw label with background
+        label = f"Person {conf:.0%}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+        cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+        cv2.putText(frame, label, (x1 + 2, y1 - 4), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
     
     return frame
 
@@ -269,7 +296,7 @@ def main():
             avg_fps = sum(fps_counter) / len(fps_counter)
             
             # Draw detections
-            frame = draw_detections(frame, detections, sizes, scale_info)
+            frame = draw_detections(frame, detections, sizes, scale_info, img_size=args.size)
             
             # Draw info panel
             info_lines = [

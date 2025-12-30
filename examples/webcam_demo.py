@@ -166,6 +166,8 @@ def main():
     parser = argparse.ArgumentParser(description="MOUAADNET-ULTRA Webcam Demo")
     parser.add_argument("--model", type=str, default="ultra", 
                         choices=["ultra", "lite"], help="Model variant")
+    parser.add_argument("--weights", type=str, default=None,
+                        help="Path to trained weights (.pt file)")
     parser.add_argument("--camera", type=int, default=0, help="Camera index")
     parser.add_argument("--size", type=int, default=416, help="Input size")
     parser.add_argument("--threshold", type=float, default=0.3, 
@@ -191,6 +193,20 @@ def main():
         model = MouaadNetUltraLite()
     else:
         model = MouaadNetUltra()
+    
+    # Load trained weights if provided
+    if args.weights:
+        print(f"Loading weights: {args.weights}")
+        checkpoint = torch.load(args.weights, map_location=device)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print(f"  Epoch: {checkpoint.get('epoch', '?')}")
+            print(f"  Best Acc: {checkpoint.get('best_acc', '?'):.2f}%" if 'best_acc' in checkpoint else "")
+        else:
+            model.load_state_dict(checkpoint)
+        print("✓ Weights loaded!")
+    else:
+        print("⚠️ Using random weights (untrained)")
     
     model = model.to(device)
     model.eval()

@@ -43,32 +43,34 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 class Config:
-    """Training configuration."""
+    """Training configuration - SOTA Nano Settings."""
     # Data
-    img_size: int = 416
-    batch_size: int = 16
+    img_size: int = 320  # Fixed size for ONNX optimization
+    batch_size: int = 32
     num_workers: int = 4
     
     # Model
     stride: int = 4
     
-    # Training
+    # Training - 1CycleLR for Super-Convergence
     epochs: int = 50
-    lr: float = 1e-3
+    lr: float = 3e-4       # Base LR (1CycleLR will go up to max_lr)
+    max_lr: float = 1e-2   # Peak LR for 1CycleLR
     weight_decay: float = 1e-4
-    warmup_epochs: int = 3
     
-    # Loss weights
+    # Focal Loss - optimized for sparse heatmaps
+    focal_alpha: float = 2.0  # Focus on hard examples
+    focal_beta: float = 4.0   # Down-weight easy negatives
     hm_weight: float = 1.0
     wh_weight: float = 0.1
     
     # Augmentation
-    aug_scale: Tuple[float, float] = (0.5, 1.5)
+    aug_scale: Tuple[float, float] = (0.6, 1.4)
     aug_flip: float = 0.5
     
     # Memory optimization
-    gradient_checkpointing: bool = True
-    compile_model: bool = False  # torch.compile (PyTorch 2.0+)
+    gradient_checkpointing: bool = False
+    compile_model: bool = False
     
     # Checkpointing
     save_every: int = 5
@@ -309,27 +311,33 @@ class COCODetectionDataset(Dataset):
 # =============================================================================
 class CenterNetLoss(nn.Module):
     """
-    CenterNet Detection Loss.
+    CenterNet Detection Loss with Focal Loss.
     
-    Components:
-    - Focal Loss for heatmap (handles class imbalance)
-    - L1 Loss for size regression
+    Focal Loss: -alpha * (1 - p_t)^gamma * log(p_t)
+    Forces model to focus on hard "person center" pixels.
     """
     
-    def __init__(self, hm_weight: float = 1.0, wh_weight: float = 0.1):
+    def __init__(self, hm_weight: float = 1.0, wh_weight: float = 0.1,
+                 alpha: float = 2.0, beta: float = 4.0):
         super().__init__()
         self.hm_weight = hm_weight
         self.wh_weight = wh_weight
+        self.alpha = alpha  # Focal term exponent
+        self.beta = beta    # Negative sample weight exponent
     
     def focal_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Focal loss for heatmap."""
+        """Focal loss for heatmap - handles sparse positive examples."""
         pred = torch.clamp(torch.sigmoid(pred), 1e-4, 1 - 1e-4)
         
         pos_mask = target.eq(1).float()
         neg_mask = target.lt(1).float()
         
-        pos_loss = -torch.log(pred) * torch.pow(1 - pred, 2) * pos_mask
-        neg_loss = -torch.log(1 - pred) * torch.pow(pred, 2) * torch.pow(1 - target, 4) * neg_mask
+        # Positive samples: focus on hard ones
+        pos_loss = -torch.log(pred) * torch.pow(1 - pred, self.alpha) * pos_mask
+        
+        # Negative samples: down-weight easy ones based on distance from center
+        neg_weight = torch.pow(1 - target, self.beta)
+        neg_loss = -torch.log(1 - pred) * torch.pow(pred, self.alpha) * neg_weight * neg_mask
         
         num_pos = pos_mask.sum().clamp(min=1)
         loss = (pos_loss.sum() + neg_loss.sum()) / num_pos
@@ -399,13 +407,24 @@ class Trainer:
             weight_decay=config.weight_decay
         )
         
-        # Scheduler with warmup
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=config.epochs
+        # 1CycleLR Scheduler for Super-Convergence
+        steps_per_epoch = len(train_loader)
+        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=config.max_lr,
+            epochs=config.epochs,
+            steps_per_epoch=steps_per_epoch,
+            pct_start=0.3,           # 30% warmup
+            anneal_strategy='cos',   # Cosine annealing
+            div_factor=25,           # Initial LR = max_lr / 25
+            final_div_factor=1000,   # Final LR = max_lr / 1000
         )
         
-        # Loss
-        self.criterion = CenterNetLoss(config.hm_weight, config.wh_weight)
+        # Loss with Focal parameters
+        self.criterion = CenterNetLoss(
+            config.hm_weight, config.wh_weight,
+            alpha=config.focal_alpha, beta=config.focal_beta
+        )
         
         # Mixed precision
         self.scaler = torch.amp.GradScaler('cuda')
@@ -440,7 +459,7 @@ class Trainer:
         logger.info(f"Loaded checkpoint from epoch {self.epoch}")
     
     def train_epoch(self) -> float:
-        """Train one epoch."""
+        """Train one epoch with 1CycleLR."""
         self.model.train()
         total_loss = 0
         
@@ -470,9 +489,14 @@ class Trainer:
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 
+                # 1CycleLR: step after each batch
+                self.scheduler.step()
+                
                 total_loss += loss.item()
             
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
+            # Show LR in progress bar
+            lr = self.scheduler.get_last_lr()[0]
+            pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{lr:.2e}")
         
         return total_loss / len(self.train_loader)
     
@@ -498,15 +522,16 @@ class Trainer:
         return total_loss / len(self.val_loader)
     
     def train(self) -> None:
-        """Full training loop."""
+        """Full training loop with 1CycleLR super-convergence."""
         logger.info(f"Training on {self.device}")
         logger.info(f"Epochs: {self.config.epochs}")
         logger.info(f"Batch size: {self.config.batch_size}")
+        logger.info(f"1CycleLR: max_lr={self.config.max_lr}, 30% warmup")
         
         for self.epoch in range(self.epoch, self.config.epochs):
             train_loss = self.train_epoch()
             val_loss = self.validate()
-            self.scheduler.step()
+            # Note: scheduler.step() is called per-batch in train_epoch
             
             self.history['train'].append(train_loss)
             self.history['val'].append(val_loss)
@@ -530,7 +555,7 @@ class Trainer:
 # =============================================================================
 # EXPORT
 # =============================================================================
-def export_onnx(model: nn.Module, save_path: str, img_size: int = 416) -> None:
+def export_onnx(model: nn.Module, save_path: str, img_size: int = 320) -> None:
     """Export model to ONNX."""
     model.eval()
     model.cpu()

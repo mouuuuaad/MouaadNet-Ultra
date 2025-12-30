@@ -64,7 +64,7 @@ class GhostModule(nn.Module):
                 bias=False,
             ),
             nn.BatchNorm2d(init_channels),
-            nn.ReLU6(inplace=True) if activation else nn.Identity(),
+            nn.SiLU(inplace=True) if activation else nn.Identity(),  # SiLU for smoother gradients
         )
         
         # Cheap operation: depthwise conv to generate ghost features
@@ -79,7 +79,7 @@ class GhostModule(nn.Module):
                 bias=False,
             ),
             nn.BatchNorm2d(new_channels),
-            nn.ReLU6(inplace=True) if activation else nn.Identity(),
+            nn.SiLU(inplace=True) if activation else nn.Identity(),  # SiLU for smoother gradients
         )
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:

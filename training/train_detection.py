@@ -28,7 +28,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torch.cuda.amp import GradScaler, autocast
 from torchvision import transforms
 
 # Setup logging
@@ -149,8 +148,23 @@ class COCODetectionDataset(Dataset):
             from pycocotools.coco import COCO
             anno_path = self.data_dir / 'annotations' / f'instances_{split}2017.json'
             self.coco = COCO(str(anno_path))
-            self.img_ids = self.coco.getImgIds(catIds=[self.PERSON_CAT_ID])
-            logger.info(f"Loaded {len(self.img_ids)} images for {split}")
+            all_img_ids = self.coco.getImgIds(catIds=[self.PERSON_CAT_ID])
+            
+            # Verify images exist (filter out missing)
+            logger.info(f"Verifying {len(all_img_ids)} images...")
+            self.img_ids = []
+            img_dir = self.data_dir / f'{split}2017'
+            for img_id in all_img_ids:
+                img_info = self.coco.loadImgs(img_id)[0]
+                img_path = img_dir / img_info['file_name']
+                if img_path.exists():
+                    self.img_ids.append(img_id)
+            
+            logger.info(f"Verified {len(self.img_ids)}/{len(all_img_ids)} images for {split}")
+            
+            if len(self.img_ids) == 0:
+                raise ValueError(f"No valid images found in {img_dir}")
+                
         except Exception as e:
             logger.error(f"Failed to load COCO: {e}")
             raise
@@ -394,7 +408,7 @@ class Trainer:
         self.criterion = CenterNetLoss(config.hm_weight, config.wh_weight)
         
         # Mixed precision
-        self.scaler = GradScaler()
+        self.scaler = torch.amp.GradScaler('cuda')
         
         # State
         self.epoch = 0
@@ -441,7 +455,7 @@ class Trainer:
             
             self.optimizer.zero_grad(set_to_none=True)
             
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 outputs = self.model(imgs)
                 pred_hm = outputs['heatmaps'][0]
                 pred_wh = outputs['sizes'][0]

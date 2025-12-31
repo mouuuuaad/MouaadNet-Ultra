@@ -15,7 +15,7 @@
 
 ## 🎯 Features
 
-- **Ultra-Lightweight**: ~0.61M parameters for V3, ~868K for V2
+- **Ultra-Lightweight**: ~2.8M parameters for V3, ~610K for V2
 - **CenterNet Architecture**: Anchor-free detection with heatmap + size regression
 - **Real-Time**: ONNX export for fast inference
 - **Production-Ready**: Webcam demo included
@@ -128,8 +128,8 @@ python training/train_detection_v3.py --data /path/to/coco --epochs 50 --export
 
 | Version | Parameters | Receptive Field | Use Case |
 |---------|------------|-----------------|----------|
-| V2 | 868K | ~96px | Fast/Mobile |
-| **V3** | 610K | ~300px | Full-body detection |
+| V2 | 610K | ~96px | Fast/Mobile |
+| **V3** | 2.8M | ~300px | Full-body detection |
 
 ## 👤 Author
 

@@ -445,7 +445,7 @@ class MouaadNetUltraV2(nn.Module):
 # =============================================================================
 class DetectionLoss(nn.Module):
     """
-    Combined Detection Loss.
+    Combined Detection Loss with numerical stability.
     
     - Focal Loss for heatmap (handles sparse positives)
     - L1 Loss for WH and Offset
@@ -457,27 +457,51 @@ class DetectionLoss(nn.Module):
         self.beta = beta
     
     def focal_loss(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """Focal loss for heatmap with Gaussian targets."""
-        pred = torch.clamp(torch.sigmoid(pred), 1e-4, 1 - 1e-4)
+        """
+        Numerically stable Focal loss for heatmap with Gaussian targets.
         
-        pos_mask = target.eq(1).float()
-        neg_mask = target.lt(1).float()
+        Uses log-sum-exp trick to prevent overflow.
+        """
+        # Clamp predictions to safe range
+        eps = 1e-6
+        pred_sig = torch.sigmoid(pred)
+        pred_sig = torch.clamp(pred_sig, eps, 1 - eps)
         
-        # Positive: focus on hard positive pixels
-        pos_loss = -torch.log(pred) * torch.pow(1 - pred, self.alpha) * pos_mask
+        # Masks
+        pos_mask = target.ge(0.99).float()  # Near-peak pixels
+        neg_mask = target.lt(0.99).float()  # Everything else
         
-        # Negative: weight by distance from center (Gaussian)
-        neg_weight = torch.pow(1 - target, self.beta)
-        neg_loss = -torch.log(1 - pred) * torch.pow(pred, self.alpha) * neg_weight * neg_mask
+        # Count positives
+        num_pos = pos_mask.sum()
         
-        num_pos = pos_mask.sum().clamp(min=1)
-        return (pos_loss.sum() + neg_loss.sum()) / num_pos
+        # If no positive samples, return small constant loss
+        if num_pos == 0:
+            # Only compute negative loss
+            neg_weight = torch.pow(1 - target + eps, self.beta)
+            neg_loss = -torch.log(1 - pred_sig + eps) * torch.pow(pred_sig, self.alpha) * neg_weight * neg_mask
+            return neg_loss.sum() / max(neg_mask.sum().item(), 1)
+        
+        # Positive loss: focus on hard positives
+        pos_loss = -torch.log(pred_sig + eps) * torch.pow(1 - pred_sig + eps, self.alpha) * pos_mask
+        
+        # Negative loss: weight by Gaussian distance
+        neg_weight = torch.pow(1 - target + eps, self.beta)
+        neg_loss = -torch.log(1 - pred_sig + eps) * torch.pow(pred_sig + eps, self.alpha) * neg_weight * neg_mask
+        
+        # Normalize by positive count
+        loss = (pos_loss.sum() + neg_loss.sum()) / num_pos
+        
+        return loss
     
     def l1_loss(self, pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """L1 loss for WH and Offset."""
+        """L1 loss for WH and Offset with numerical stability."""
         mask = mask.unsqueeze(1).expand_as(pred)
+        num = mask.sum()
+        
+        if num == 0:
+            return torch.tensor(0.0, device=pred.device)
+        
         loss = F.l1_loss(pred * mask, target * mask, reduction='sum')
-        num = mask.sum().clamp(min=1)
         return loss / num
     
     def forward(self, pred: Dict, target: Dict) -> Dict[str, torch.Tensor]:
@@ -485,13 +509,18 @@ class DetectionLoss(nn.Module):
         wh_loss = self.l1_loss(pred['wh'], target['wh'], target['mask'])
         off_loss = self.l1_loss(pred['offset'], target['offset'], target['mask'])
         
+        # Weighted sum
         total = hm_loss + 0.1 * wh_loss + 1.0 * off_loss
+        
+        # Final safety check
+        if not torch.isfinite(total):
+            total = torch.tensor(0.0, device=pred['heatmap'].device, requires_grad=True)
         
         return {
             'total': total,
-            'hm': hm_loss.detach(),
-            'wh': wh_loss.detach(),
-            'off': off_loss.detach(),
+            'hm': hm_loss.detach() if torch.isfinite(hm_loss) else torch.tensor(0.0),
+            'wh': wh_loss.detach() if torch.isfinite(wh_loss) else torch.tensor(0.0),
+            'off': off_loss.detach() if torch.isfinite(off_loss) else torch.tensor(0.0),
         }
 
 

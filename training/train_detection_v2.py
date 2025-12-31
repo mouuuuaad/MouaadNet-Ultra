@@ -627,7 +627,7 @@ class Trainer:
     
     def train_epoch(self) -> float:
         self.model.train()
-        total_loss = 0
+        total_loss = 0.0
         n_batches = 0
         
         from tqdm import tqdm
@@ -644,29 +644,36 @@ class Trainer:
                 losses = self.criterion(preds, targets)
                 loss = losses['total']
             
+            # Always accumulate loss for reporting
             if torch.isfinite(loss):
-                old_scale = self.scaler.get_scale()
+                loss_val = loss.item()
+                total_loss += loss_val
+                n_batches += 1
+                
+                # Backward and step
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10.0)
+                
+                old_scale = self.scaler.get_scale()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
                 
-                # Only step scheduler if optimizer stepped
+                # Step scheduler only if optimizer stepped
                 if self.scaler.get_scale() >= old_scale:
                     self.scheduler.step()
                 
-                total_loss += loss.item()
-                n_batches += 1
-                
                 lr = self.scheduler.get_last_lr()[0]
                 pbar.set_postfix(
-                    loss=f"{loss.item():.2f}",
+                    loss=f"{loss_val:.2f}",
                     hm=f"{losses['hm'].item():.2f}",
                     lr=f"{lr:.1e}"
                 )
+            else:
+                logger.warning(f"NaN/Inf loss at batch {n_batches}")
         
-        return total_loss / max(n_batches, 1)
+        avg_loss = total_loss / max(n_batches, 1)
+        return avg_loss
     
     @torch.no_grad()
     def validate(self) -> float:

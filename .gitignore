@@ -111,3 +111,12 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+# Rust build artifacts
+ultra-core/target/
+
+# Python venv
+.venv/
+
+# Cargo lock
+ultra-core/Cargo.lock

@@ -2,174 +2,142 @@
 
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="MOUAADNET-ULTRA Logo" width="200"/>
-
-**High-Efficiency Human Detection and Gender Classification**
+**High-Efficiency Human Detection Network**
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![ONNX](https://img.shields.io/badge/ONNX-Runtime-green.svg)](https://onnxruntime.ai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-
-[📖 Documentation](docs/) | [🚀 Quick Start](#quick-start) | [📦 Installation](#installation) | [🤝 Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-## 🎯 Key Features
+## 🎯 Features
 
-- **Ultra-Lightweight**: 868K parameters, ~0.83MB INT8 quantized
-- **Multi-Task**: Simultaneous human detection + gender classification
-- **Real-Time**: Designed for <10ms inference on GPU
-- **Production-Ready**: ONNX export, INT8 quantization, mobile deployment
+- **Ultra-Lightweight**: ~2.9M parameters for V3, ~868K for V2
+- **CenterNet Architecture**: Anchor-free detection with heatmap + size regression
+- **Real-Time**: ONNX export for fast inference
+- **Production-Ready**: Webcam demo included
 
-## 📊 Model Variants
-
-| Variant | Parameters | FP32 Size | INT8 Size | Use Case |
-|---------|------------|-----------|-----------|----------|
-| **Ultra** | 868,860 | 3.31 MB | 0.83 MB | Balanced |
-| **Lite** | 517,411 | 1.97 MB | 0.49 MB | Mobile/Edge |
-| **Pro** | ~1.5M | ~6 MB | ~1.5 MB | High Accuracy |
-
-## 🏗️ Architecture
+## 🏗️ Architecture (V3)
 
 ```
-Input (416×416×3)
-    ↓
-┌─────────────────────────────────────┐
-│  NANO-BACKBONE (5 Stages)           │
-│  PConv + Ghost + IRB + ReLU6        │
-│  16 → 24 → 40 → 80 → 128 channels   │
-└─────────────────────────────────────┘
-    ↓ P3, P4, P5
-┌─────────────────────────────────────┐
-│  SLIM-PAN NECK                      │
-│  Bi-directional Feature Fusion      │
-│  + SPP-Lite + CSP Connections       │
-└─────────────────────────────────────┘
-    ↓ N3, N4, N5
-┌─────────────────────────────────────┐
-│  DECOUPLED HEADS                    │
-│  ├─ Detection: Heatmap + Size + Off │
-│  └─ Gender: Attention + GAP + FC    │
-└─────────────────────────────────────┘
-    ↓
-Output: Bounding Boxes + Gender Labels
+Input (256×256×3)
+       ↓
+┌─────────────────────────────────┐
+│  NANO-BACKBONE                  │
+│  DepthwiseSeparable Convs       │
+│  32 → 64 → 128 → 256 channels   │
+└─────────────────────────────────┘
+       ↓
+┌─────────────────────────────────┐
+│  ASPP MODULE (V3)               │
+│  Dilated Convs: 1, 6, 12, 18    │
+│  ~300px receptive field         │
+└─────────────────────────────────┘
+       ↓
+┌─────────────────────────────────┐
+│  DECOUPLED HEAD (V3)            │
+│  ├─ Heatmap: 2 conv layers      │
+│  ├─ WH: 2 conv + GlobalContext  │
+│  └─ Offset: 1 conv layer        │
+└─────────────────────────────────┘
+       ↓
+Output: Heatmap (64×64) + WH + Offset
 ```
 
 ## 🚀 Quick Start
 
+### Webcam Demo (ONNX)
+```bash
+python examples/webcam_onnx_demo.py --model detection.onnx --threshold 0.1
+```
+
+### Python API
 ```python
 import torch
-from mouaadnet_ultra import MouaadNetUltra
+from training.train_detection_v3 import MouaadNetUltraV3
 
-# Load model
-model = MouaadNetUltra()
+model = MouaadNetUltraV3()
 model.eval()
 
 # Inference
-image = torch.randn(1, 3, 416, 416)
+image = torch.randn(1, 3, 256, 256)
 outputs = model(image)
 
-# Results
-print(f"Detection heatmaps: {[h.shape for h in outputs['heatmaps']]}")
-print(f"Gender prediction: {torch.sigmoid(outputs['gender'])}")
+print(f"Heatmap: {outputs['heatmap'].shape}")  # [1, 1, 64, 64]
+print(f"WH: {outputs['wh'].shape}")            # [1, 2, 64, 64]
+print(f"Offset: {outputs['offset'].shape}")    # [1, 2, 64, 64]
 ```
 
 ## 📦 Installation
 
-### From Source (Recommended)
 ```bash
-git clone https://github.com/mouaadidoufkir/mouaadnet-ultra.git
-cd mouaadnet-ultra
-pip install -e .
-```
-
-### Requirements
-```bash
+git clone https://github.com/mouuuuaad/MouaadNet-Ultra.git
+cd MouaadNet-Ultra
 pip install -r requirements.txt
 ```
 
 ## 🎓 Training
 
+### V3 (Recommended - Full Body Detection)
 ```bash
-# Train with default config
-python scripts/train.py --config configs/default.yaml
-
-# Train with custom dataset
-python scripts/train.py \
-    --data /path/to/dataset \
-    --epochs 100 \
-    --batch-size 32
+python training/train_detection_v3.py \
+    --data /path/to/coco \
+    --epochs 50 \
+    --export
 ```
 
-## 📤 Export
-
-```bash
-# Export to ONNX
-python scripts/export.py --format onnx --output exports/model.onnx
-
-# Export with INT8 quantization
-python scripts/export.py --format onnx --quantize int8
-```
+**V3 Improvements:**
+| Feature | V2 | V3 |
+|---------|----|----|
+| Receptive Field | ~96px | ~300px (ASPP) |
+| WH Loss Weight | 0.1 | 1.0 |
+| Min Gaussian Radius | 1 | 3 |
+| WH Branch | 1 conv | 2 conv + GlobalContext |
 
 ## 📁 Project Structure
 
 ```
-mouaadnet-ultra/
-├── mouaadnet_ultra/          # Core library
-│   ├── backbone/             # Nano-backbone components
-│   ├── neck/                 # Feature fusion modules
-│   ├── heads/                # Detection & classification heads
-│   ├── losses/               # Loss functions
-│   ├── optim/                # Optimization utilities
-│   └── model.py              # Main model class
+MouaadNet-Ultra/
+├── mouaadnet_ultra/          # Core library (V1/V2)
+│   ├── backbone/             # Nano-backbone
+│   ├── neck/                 # Slim-PAN
+│   └── heads/                # Detection heads
+├── training/
+│   ├── train_detection_v2.py # V2 training
+│   └── train_detection_v3.py # V3 training (recommended)
+├── examples/
+│   ├── webcam_onnx_demo.py   # ONNX webcam demo
+│   └── webcam_demo.py        # PyTorch webcam demo
 ├── configs/                  # Configuration files
-├── data/                     # Dataset utilities
-├── docs/                     # Documentation
-├── examples/                 # Usage examples
-├── scripts/                  # Training & export scripts
-├── tests/                    # Test suite
-└── exports/                  # Exported models
+├── detection.onnx            # Pre-trained V2 model
+└── requirements.txt
 ```
 
-## 🧪 Testing
+## 📤 Export to ONNX
 
+After training, models are exported automatically with `--export`:
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Quick validation
-python tests/test_all.py
+# Output: checkpoints_v3/detection_v3.onnx
+python training/train_detection_v3.py --data /path/to/coco --epochs 50 --export
 ```
 
-## 📈 Benchmarks
+## 📊 Model Variants
 
-| Hardware | Input Size | FP32 | FP16 | INT8 |
-|----------|------------|------|------|------|
-| RTX 3090 | 416×416 | 4.2ms | 2.1ms | 1.3ms |
-| Jetson Nano | 416×416 | 45ms | 28ms | 18ms |
-| CPU (i7) | 416×416 | 120ms | - | 85ms |
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## 📄 License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+| Version | Parameters | Receptive Field | Use Case |
+|---------|------------|-----------------|----------|
+| V2 | 868K | ~96px | Fast/Mobile |
+| **V3** | 2.9M | ~300px | Full-body detection |
 
 ## 👤 Author
 
 **MOUAAD IDOUFKIR** - Lead Architect
 
-## 🙏 Acknowledgments
+## 📄 License
 
-- FasterNet for Partial Convolution inspiration
-- GhostNet for Ghost Module design
-- RepVGG for structural re-parameterization
-- CenterNet for anchor-free detection
+MIT License - see [LICENSE](LICENSE)
 
 ---
 

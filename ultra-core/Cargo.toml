@@ -1,0 +1,33 @@
+[package]
+name = "ultra_core"
+version = "1.0.0"
+edition = "2021"
+authors = ["MOUAAD IDOUFKIR"]
+description = "High-performance Rust extensions for MouaadNet-Ultra neural network"
+license = "MIT"
+
+[lib]
+name = "ultra_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+# Python bindings - updated for Python 3.13 support
+pyo3 = { version = "0.24", features = ["extension-module"] }
+numpy = "0.24"
+
+# Image processing
+image = "0.24"
+
+# Numerical operations
+ndarray = "0.15"
+
+# Parallel processing for speedup
+rayon = "1.8"
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
